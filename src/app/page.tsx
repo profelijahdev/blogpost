@@ -342,11 +342,7 @@ export default function Home() {
   const [researching, setResearching] = useState(false);
   const [activeTab, setActiveTab] = useState('blog');
   const [selectedPost, setSelectedPost] = useState<BlogPost | null>(null);
-  const [newPostTitle, setNewPostTitle] = useState('');
-  const [newPostContent, setNewPostContent] = useState('');
-  const [newPostCategory, setNewPostCategory] = useState('AI Tools');
-  const [newPostExcerpt, setNewPostExcerpt] = useState('');
-  const [autoPublish, setAutoPublish] = useState(false);
+
 
   // Newsletter
   const [email, setEmail] = useState('');
@@ -495,32 +491,7 @@ export default function Home() {
     } catch {} finally { setResearching(false); }
   };
 
-  const handleAutoPost = async (count: number) => {
-    setGenerating(true);
-    try {
-      const res = await fetch('/api/autopost', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ count, autoPublish }) });
-      const data = await res.json();
-      if (data.created > 0) await loadData();
-    } catch {} finally { setGenerating(false); }
-  };
 
-  const handleCreatePost = async () => {
-    if (!newPostTitle.trim()) return;
-    setGenerating(true);
-    try {
-      const slug = newPostTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 60);
-      await fetch('/api/blog', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: newPostTitle, slug, excerpt: newPostExcerpt, content: newPostContent, category: newPostCategory, tags: newPostCategory.split(' '), published: autoPublish, featured: false, trending: false, authorName: 'Daktari Brian', readTime: Math.ceil(newPostContent.split(' ').length / 200) }),
-      });
-      setNewPostTitle(''); setNewPostContent(''); setNewPostExcerpt('');
-      await loadData(); setActiveTab('blog');
-    } catch {} finally { setGenerating(false); }
-  };
-
-  const handlePublishPost = async (id: string, publish: boolean) => {
-    try { await fetch(`/api/blog/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ published: publish }) }); await loadData(); } catch {}
-  };
 
   const parseTags = (tagsStr: string): string[] => { try { return JSON.parse(tagsStr); } catch { return tagsStr.split(',').map(t => t.trim()).filter(Boolean); } };
 
@@ -583,59 +554,7 @@ export default function Home() {
                   <span className="flex items-center gap-1"><TrendingUp className="w-4 h-4 text-amber-600" />{stats.trendingTopics + 15} trending</span>
                 </div>
               )}
-              <Dialog>
-                <DialogTrigger asChild><Button variant="outline" size="sm" className="gap-1.5 border-slate-300"><Settings className="w-4 h-4" /> Manage</Button></DialogTrigger>
-                <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
-                  <DialogHeader>
-                    <DialogTitle className="flex items-center gap-2"><Rocket className="w-5 h-5 text-emerald-600" /> Dashboard — Manage Blog</DialogTitle>
-                    <DialogDescription>Research, auto-generate, and manage your content.</DialogDescription>
-                  </DialogHeader>
-                  <Tabs defaultValue="research" className="mt-4">
-                    <TabsList className="grid w-full grid-cols-3">
-                      <TabsTrigger value="research" className="gap-1.5"><Search className="w-4 h-4" /> Research</TabsTrigger>
-                      <TabsTrigger value="autopost" className="gap-1.5"><Sparkles className="w-4 h-4" /> Auto-Post</TabsTrigger>
-                      <TabsTrigger value="create" className="gap-1.5"><PenTool className="w-4 h-4" /> Create</TabsTrigger>
-                    </TabsList>
-                    <TabsContent value="research" className="space-y-4 mt-4">
-                      <div className="flex items-center justify-between">
-                        <div><h3 className="font-semibold text-slate-900">Trending Topics Research</h3><p className="text-sm text-slate-500">Find what people are searching for now</p></div>
-                        <Button onClick={handleResearchTopics} disabled={researching} className="bg-emerald-600 hover:bg-emerald-700">{researching ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <RefreshCw className="w-4 h-4 mr-1.5" />}{researching ? 'Researching...' : 'Research Now'}</Button>
-                      </div>
-                      {trendingTopics.length > 0 ? (
-                        <div className="space-y-2 max-h-96 overflow-y-auto">{trendingTopics.map((topic) => (
-                          <div key={topic.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-100">
-                            <div className="flex-1 min-w-0"><p className="text-sm font-medium text-slate-900 truncate">{topic.keyword}</p><div className="flex items-center gap-2 mt-1"><Badge variant="outline" className="text-xs">{topic.category}</Badge><span className="text-xs text-slate-400">{topic.source}</span></div></div>
-                            <div className="flex items-center gap-3 ml-3"><div className="flex items-center gap-1"><TrendingUp className="w-3.5 h-3.5 text-amber-500" /><span className="text-sm font-bold text-amber-600">{topic.trendScore}</span></div>{topic.usedForPost ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : <AlertCircle className="w-4 h-4 text-slate-300" />}</div>
-                          </div>))}</div>
-                      ) : <div className="text-center py-8 text-slate-400"><Search className="w-10 h-10 mx-auto mb-2 opacity-30" /><p>Click &quot;Research Now&quot; to discover trending topics</p></div>}
-                    </TabsContent>
-                    <TabsContent value="autopost" className="space-y-4 mt-4">
-                      <div><h3 className="font-semibold text-slate-900">Auto-Generate Blog Posts</h3><p className="text-sm text-slate-500">AI writes SEO-optimized posts based on trending research</p></div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <Card className="cursor-pointer hover:border-emerald-300 transition-colors" onClick={() => handleAutoPost(1)}><CardContent className="p-4 text-center"><Sparkles className="w-8 h-8 text-emerald-600 mx-auto mb-2" /><p className="font-semibold">Generate 1 Post</p><p className="text-xs text-slate-500 mt-1">From top trending topic</p></CardContent></Card>
-                        <Card className="cursor-pointer hover:border-amber-300 transition-colors" onClick={() => handleAutoPost(3)}><CardContent className="p-4 text-center"><Rocket className="w-8 h-8 text-amber-600 mx-auto mb-2" /><p className="font-semibold">Generate 3 Posts</p><p className="text-xs text-slate-500 mt-1">Batch content creation</p></CardContent></Card>
-                      </div>
-                      <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg"><label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={autoPublish} onChange={(e) => setAutoPublish(e.target.checked)} className="rounded border-slate-300" /><span className="text-sm font-medium">Auto-publish generated posts</span></label></div>
-                      {generating && <div className="flex items-center gap-3 p-4 bg-emerald-50 border border-emerald-200 rounded-lg"><Loader2 className="w-5 h-5 text-emerald-600 animate-spin" /><div><p className="font-medium text-emerald-900">AI is generating your blog post...</p><p className="text-sm text-emerald-700">This may take 30-60 seconds</p></div></div>}
-                    </TabsContent>
-                    <TabsContent value="create" className="space-y-4 mt-4">
-                      <div><h3 className="font-semibold text-slate-900">Create Blog Post</h3><p className="text-sm text-slate-500">Write and publish manually</p></div>
-                      <div className="space-y-3">
-                        <Input placeholder="Post title..." value={newPostTitle} onChange={(e) => setNewPostTitle(e.target.value)} />
-                        <Input placeholder="Excerpt (2-3 sentences)..." value={newPostExcerpt} onChange={(e) => setNewPostExcerpt(e.target.value)} />
-                        <select className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" value={newPostCategory} onChange={(e) => setNewPostCategory(e.target.value)}>
-                          {['AI Tools','SaaS','Productivity','Marketing','Developer','Comparisons','Strategy'].map(c => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                        <Textarea placeholder="Write your blog content here... (HTML supported)" rows={8} value={newPostContent} onChange={(e) => setNewPostContent(e.target.value)} />
-                        <div className="flex items-center gap-3">
-                          <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={autoPublish} onChange={(e) => setAutoPublish(e.target.checked)} className="rounded border-slate-300" /><span className="text-sm">Publish immediately</span></label>
-                          <Button onClick={handleCreatePost} disabled={!newPostTitle.trim() || generating} className="bg-emerald-600 hover:bg-emerald-700 ml-auto">{generating ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <PenTool className="w-4 h-4 mr-1.5" />}Create Post</Button>
-                        </div>
-                      </div>
-                    </TabsContent>
-                  </Tabs>
-                </DialogContent>
-              </Dialog>
+              <a href="/admin"><Button variant="outline" size="sm" className="gap-1.5 border-slate-300"><Shield className="w-4 h-4" /> Admin</Button></a>
             </div>
           </div>
         </div>
@@ -941,10 +860,7 @@ export default function Home() {
                   )}
                 </div>
 
-                {/* Admin Actions */}
-                <div className="mt-4 pt-4 border-t border-slate-200 flex items-center gap-2">
-                  <Button size="sm" variant={selectedPost.published ? 'outline' : 'default'} className={selectedPost.published ? '' : 'bg-emerald-600 hover:bg-emerald-700'} onClick={() => handlePublishPost(selectedPost.id, !selectedPost.published)}>{selectedPost.published ? 'Unpublish' : 'Publish'}</Button>
-                </div>
+
               </>
             );
           })()}
