@@ -1,17 +1,6 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-
-// Sanitize input to prevent XSS
-function sanitize(str: string, maxLen = 500): string {
-  return str
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;')
-    .replace(/\//g, '&#x2F;')
-    .trim()
-    .slice(0, maxLen);
-}
+import { sanitizeInput, detectMaliciousInput } from '@/lib/security';
 
 // GET /api/comments?postId=xxx - Get comments for a post
 export async function GET(request: Request) {
@@ -23,9 +12,23 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'postId is required' }, { status: 400 });
     }
 
-    const comments = await db.$queryRawUnsafe(
-      `SELECT id, blogPostId, authorName, content, parentId, liked, createdAt FROM Comment WHERE blogPostId = '${sanitize(postId, 50)}' AND flagged = 0 ORDER BY createdAt DESC LIMIT 50`
-    );
+    const comments = await db.comment.findMany({
+      where: {
+        blogPostId: postId,
+        flagged: false,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      select: {
+        id: true,
+        blogPostId: true,
+        authorName: true,
+        content: true,
+        parentId: true,
+        liked: true,
+        createdAt: true,
+      },
+    });
 
     return NextResponse.json({ comments });
   } catch (e) {
@@ -54,29 +57,47 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Comment must be 3-2000 characters' }, { status: 400 });
     }
 
-    // Spam detection - basic checks
+    // Spam detection
     const spamPatterns = /(?:https?:\/\/[^\s]+|viagra|casino|lottery|winner|congratulations|click here|free money)/i;
     if (spamPatterns.test(content) || spamPatterns.test(authorName)) {
       return NextResponse.json({ error: 'Comment flagged as spam' }, { status: 422 });
     }
 
-    const cleanName = sanitize(authorName, 50);
-    const cleanContent = sanitize(content, 2000);
-    const cleanEmail = authorEmail ? sanitize(authorEmail, 254) : '';
-    const cleanParentId = parentId ? sanitize(parentId, 50) : null;
+    const cleanName = sanitizeInput(authorName, 50);
+    const cleanContent = sanitizeInput(content, 2000);
+    const cleanEmail = authorEmail ? sanitizeInput(authorEmail, 254) : null;
 
-    const id = `cmt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    // Check for malicious input
+    const nameCheck = detectMaliciousInput(cleanName);
+    const contentCheck = detectMaliciousInput(cleanContent);
+    if (!nameCheck.safe || !contentCheck.safe) {
+      return NextResponse.json({ error: 'Invalid input detected' }, { status: 400 });
+    }
 
-    await db.$executeRawUnsafe(
-      `INSERT INTO Comment (id, blogPostId, authorName, authorEmail, content, parentId, liked, flagged, createdAt, updatedAt) VALUES ('${id}', '${sanitize(postId, 50)}', '${cleanName}', '${cleanEmail}', '${cleanContent}', ${cleanParentId ? `'${cleanParentId}'` : 'NULL'}, 0, 0, datetime('now'), datetime('now'))`
-    );
+    // Verify the blog post exists
+    const post = await db.blogPost.findUnique({ where: { id: postId } });
+    if (!post) {
+      return NextResponse.json({ error: 'Post not found' }, { status: 404 });
+    }
+
+    // Create comment
+    const comment = await db.comment.create({
+      data: {
+        blogPostId: postId,
+        authorName: cleanName,
+        authorEmail: cleanEmail,
+        content: cleanContent,
+        parentId: parentId || null,
+      },
+    });
 
     // Increment comment count on the post
-    await db.$executeRawUnsafe(
-      `UPDATE BlogPost SET commentCount = commentCount + 1 WHERE id = '${sanitize(postId, 50)}'`
-    );
+    await db.blogPost.update({
+      where: { id: postId },
+      data: { commentCount: { increment: 1 } },
+    });
 
-    return NextResponse.json({ success: true, id });
+    return NextResponse.json({ success: true, id: comment.id });
   } catch (e) {
     console.error('Comment POST error:', e);
     return NextResponse.json({ error: 'Failed to post comment' }, { status: 500 });

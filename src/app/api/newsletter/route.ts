@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { sanitizeInput, isValidEmail, detectMaliciousInput, checkRateLimit } from '@/lib/security';
-
-const OWNER_EMAIL = 'koechbrian245@gmail.com';
+import { sendNotificationEmail } from '@/lib/ai-service';
 
 // POST /api/newsletter - Subscribe to newsletter
 export async function POST(request: Request) {
@@ -30,45 +29,45 @@ export async function POST(request: Request) {
     if (!emailCheck.safe || !nameCheck.safe) {
       // Log the attempt
       try {
-        await db.$executeRawUnsafe(
-          `INSERT INTO SecurityLog (id, ip, action, reason, createdAt) VALUES ('sec_${Date.now()}', '${ip}', 'newsletter_signup', '${!emailCheck.safe ? emailCheck.reason : nameCheck.reason}', datetime('now'))`
-        );
+        await db.securityLog.create({
+          data: {
+            ip,
+            action: 'newsletter_signup_blocked',
+            reason: !emailCheck.safe ? emailCheck.reason : nameCheck.reason,
+          },
+        });
       } catch {}
       return NextResponse.json({ error: 'Invalid input detected' }, { status: 400 });
     }
 
-    // Insert subscriber (with conflict handling)
-    const id = `sub_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    try {
-      await db.$executeRawUnsafe(
-        `INSERT INTO NewsletterSubscriber (id, email, name, active, source, createdAt) VALUES ('${id}', '${cleanEmail}', '${cleanName}', 1, 'blog', datetime('now'))`
-      );
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes('UNIQUE') || msg.includes('duplicate')) {
-        return NextResponse.json({ message: 'Already subscribed! Welcome back.' });
-      }
-      throw e;
+    // Check if already subscribed
+    const existing = await db.newsletterSubscriber.findUnique({
+      where: { email: cleanEmail },
+    });
+
+    if (existing) {
+      return NextResponse.json({ message: 'Already subscribed! Welcome back.' });
     }
 
-    // Log the new subscriber notification
-    console.log(`📧 ====== NEW SUBSCRIBER NOTIFICATION ======`);
-    console.log(`📧 Email: ${cleanEmail}`);
-    console.log(`📧 Name: ${cleanName || 'Not provided'}`);
-    console.log(`📧 Notify owner at: ${OWNER_EMAIL}`);
-    console.log(`📧 Total subscribers should be updated`);
-    console.log(`📧 ==========================================`);
+    // Create subscriber
+    await db.newsletterSubscriber.create({
+      data: {
+        email: cleanEmail,
+        name: cleanName || null,
+        source: 'blog',
+        active: true,
+      },
+    });
 
-    // Store notification record so the owner can see it
-    try {
-      await db.$executeRawUnsafe(
-        `INSERT INTO SecurityLog (id, ip, action, path, reason, createdAt) VALUES ('ntf_${Date.now()}', '${ip}', 'new_subscriber', '${cleanEmail}', 'Notify: ${OWNER_EMAIL}', datetime('now'))`
-      );
-    } catch {}
+    // Send notification email to owner
+    await sendNotificationEmail('subscriber', {
+      email: cleanEmail,
+      name: cleanName,
+    });
 
     return NextResponse.json({
       success: true,
-      message: 'Welcome to AI Toolkit Hub by Daktari Brian! You\'ll receive the latest AI tool insights every week.',
+      message: "Welcome to AI Toolkit Hub by Daktari Brian! You'll receive the latest AI tool insights every week.",
     });
   } catch (e) {
     console.error('Newsletter error:', e);
@@ -79,10 +78,10 @@ export async function POST(request: Request) {
 // GET /api/newsletter - Get subscriber stats
 export async function GET() {
   try {
-    const result = await db.$queryRawUnsafe(
-      `SELECT COUNT(*) as count FROM NewsletterSubscriber WHERE active = 1`
-    ) as Array<{ count: number }>;
-    return NextResponse.json({ subscribers: result[0]?.count || 0 });
+    const count = await db.newsletterSubscriber.count({
+      where: { active: true },
+    });
+    return NextResponse.json({ subscribers: count });
   } catch {
     return NextResponse.json({ subscribers: 0 });
   }

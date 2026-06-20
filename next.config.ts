@@ -5,6 +5,7 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
+  // Vercel handles this automatically; no need for standalone output
   async headers() {
     return [
       {

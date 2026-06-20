@@ -1,10 +1,6 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 
-function sanitize(str: string, maxLen = 100): string {
-  return str.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, maxLen);
-}
-
 // POST /api/interact - Like or share a post
 export async function POST(request: Request) {
   try {
@@ -19,41 +15,48 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'postId, action, and sessionId are required' }, { status: 400 });
     }
 
-    const cleanPostId = sanitize(postId, 50);
-    const cleanSessionId = sanitize(sessionId, 100);
-
     if (action === 'like') {
       // Check if already liked
-      const existing = await db.$queryRawUnsafe(
-        `SELECT id FROM PostLike WHERE blogPostId = '${cleanPostId}' AND sessionId = '${cleanSessionId}' LIMIT 1`
-      ) as Array<{ id: string }>;
+      const existing = await db.postLike.findUnique({
+        where: {
+          blogPostId_sessionId: {
+            blogPostId: postId,
+            sessionId: sessionId,
+          },
+        },
+      });
 
-      if (existing && existing.length > 0) {
+      if (existing) {
         // Unlike
-        await db.$executeRawUnsafe(
-          `DELETE FROM PostLike WHERE blogPostId = '${cleanPostId}' AND sessionId = '${cleanSessionId}'`
-        );
-        await db.$executeRawUnsafe(
-          `UPDATE BlogPost SET likeCount = MAX(0, likeCount - 1) WHERE id = '${cleanPostId}'`
-        );
+        await db.postLike.delete({
+          where: { id: existing.id },
+        });
+        await db.blogPost.update({
+          where: { id: postId },
+          data: { likeCount: { decrement: 1 } },
+        });
         return NextResponse.json({ liked: false });
       } else {
         // Like
-        const id = `like_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        await db.$executeRawUnsafe(
-          `INSERT INTO PostLike (id, blogPostId, sessionId, createdAt) VALUES ('${id}', '${cleanPostId}', '${cleanSessionId}', datetime('now'))`
-        );
-        await db.$executeRawUnsafe(
-          `UPDATE BlogPost SET likeCount = likeCount + 1 WHERE id = '${cleanPostId}'`
-        );
+        await db.postLike.create({
+          data: {
+            blogPostId: postId,
+            sessionId: sessionId,
+          },
+        });
+        await db.blogPost.update({
+          where: { id: postId },
+          data: { likeCount: { increment: 1 } },
+        });
         return NextResponse.json({ liked: true });
       }
     }
 
     if (action === 'share') {
-      await db.$executeRawUnsafe(
-        `UPDATE BlogPost SET shareCount = shareCount + 1 WHERE id = '${cleanPostId}'`
-      );
+      await db.blogPost.update({
+        where: { id: postId },
+        data: { shareCount: { increment: 1 } },
+      });
       return NextResponse.json({ shared: true });
     }
 
@@ -75,11 +78,13 @@ export async function GET(request: Request) {
       return NextResponse.json({ liked: false });
     }
 
-    const existing = await db.$queryRawUnsafe(
-      `SELECT id FROM PostLike WHERE blogPostId = '${sanitize(postId, 50)}' AND sessionId = '${sanitize(sessionId, 100)}' LIMIT 1`
-    ) as Array<{ id: string }>;
+    const existing = await db.postLike.findUnique({
+      where: {
+        blogPostId_sessionId: { blogPostId: postId, sessionId },
+      },
+    });
 
-    return NextResponse.json({ liked: existing && existing.length > 0 });
+    return NextResponse.json({ liked: !!existing });
   } catch {
     return NextResponse.json({ liked: false });
   }

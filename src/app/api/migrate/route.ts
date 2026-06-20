@@ -1,88 +1,53 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 
-// GET /api/migrate - Run database migrations
+// GET /api/migrate - Run database migrations using Prisma
+// On Vercel with PostgreSQL, Prisma handles migrations via `prisma migrate deploy`
+// This endpoint seeds initial data if needed
 export async function GET() {
   const results: string[] = [];
 
-  // Add new columns to BlogPost
-  const alterStatements = [
-    "ALTER TABLE BlogPost ADD COLUMN likeCount INTEGER DEFAULT 0",
-    "ALTER TABLE BlogPost ADD COLUMN shareCount INTEGER DEFAULT 0",
-    "ALTER TABLE BlogPost ADD COLUMN commentCount INTEGER DEFAULT 0",
-    "ALTER TABLE BlogPost ADD COLUMN authorName TEXT DEFAULT 'Daktari Brian'",
-    "ALTER TABLE BlogPost ADD COLUMN readTime INTEGER DEFAULT 5",
-  ];
+  try {
+    // Check if we have any blog posts; if not, seed initial data
+    const postCount = await db.blogPost.count();
 
-  for (const sql of alterStatements) {
-    try {
-      await db.$executeRawUnsafe(sql);
-      results.push(`OK: ${sql.slice(0, 60)}...`);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes('duplicate') || msg.includes('already exists')) {
-        results.push(`SKIP (exists): ${sql.slice(0, 60)}...`);
-      } else {
-        results.push(`ERR: ${sql.slice(0, 60)}... - ${msg.slice(0, 80)}`);
-      }
+    if (postCount === 0) {
+      results.push('No posts found — seeding initial data...');
+
+      // Create default autopost config
+      await db.autoPostConfig.upsert({
+        where: { id: 'default' },
+        update: {},
+        create: {
+          id: 'default',
+          postsPerDay: 2,
+          autoPublish: false,
+          isActive: true,
+          categories: 'AI Tools,SaaS,Productivity,Marketing,Developer',
+        },
+      });
+      results.push('OK: Created default autopost config');
+    } else {
+      results.push(`OK: Database has ${postCount} posts, no seeding needed`);
     }
-  }
 
-  // Create new tables
-  const createStatements = [
-    `CREATE TABLE IF NOT EXISTS NewsletterSubscriber (
-      id TEXT PRIMARY KEY,
-      email TEXT UNIQUE NOT NULL,
-      name TEXT,
-      active INTEGER DEFAULT 1,
-      source TEXT DEFAULT 'blog',
-      createdAt TEXT DEFAULT (datetime('now'))
-    )`,
-    `CREATE TABLE IF NOT EXISTS Comment (
-      id TEXT PRIMARY KEY,
-      blogPostId TEXT NOT NULL,
-      authorName TEXT NOT NULL,
-      authorEmail TEXT,
-      content TEXT NOT NULL,
-      parentId TEXT,
-      liked INTEGER DEFAULT 0,
-      flagged INTEGER DEFAULT 0,
-      createdAt TEXT DEFAULT (datetime('now')),
-      updatedAt TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (blogPostId) REFERENCES BlogPost(id) ON DELETE CASCADE
-    )`,
-    `CREATE TABLE IF NOT EXISTS PostLike (
-      id TEXT PRIMARY KEY,
-      blogPostId TEXT NOT NULL,
-      sessionId TEXT NOT NULL,
-      createdAt TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (blogPostId) REFERENCES BlogPost(id) ON DELETE CASCADE,
-      UNIQUE(blogPostId, sessionId)
-    )`,
-    `CREATE TABLE IF NOT EXISTS SecurityLog (
-      id TEXT PRIMARY KEY,
-      ip TEXT,
-      action TEXT NOT NULL,
-      path TEXT,
-      userAgent TEXT,
-      blocked INTEGER DEFAULT 0,
-      reason TEXT,
-      createdAt TEXT DEFAULT (datetime('now'))
-    )`,
-  ];
+    // Ensure autopost config exists
+    await db.autoPostConfig.upsert({
+      where: { id: 'default' },
+      update: {},
+      create: {
+        id: 'default',
+        postsPerDay: 2,
+        autoPublish: false,
+        isActive: true,
+        categories: 'AI Tools,SaaS,Productivity,Marketing,Developer',
+      },
+    });
 
-  for (const sql of createStatements) {
-    try {
-      await db.$executeRawUnsafe(sql);
-      results.push(`OK: Created table`);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes('already exists')) {
-        results.push(`SKIP: Table already exists`);
-      } else {
-        results.push(`ERR: ${msg.slice(0, 100)}`);
-      }
-    }
+    results.push('OK: Migration/seed check complete');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    results.push(`ERR: ${msg.slice(0, 200)}`);
   }
 
   return NextResponse.json({ results });
